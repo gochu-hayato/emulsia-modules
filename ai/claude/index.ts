@@ -1,25 +1,21 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { AiClient, AiOptions, Tier } from '../types';
-import { resolveClaudeModel } from '../config';
+import { AI_MODELS } from '../config';
+import type { AiClient, AiOptions, AiTier } from '../types';
 
-export type { AiClient, AiOptions, Tier } from '../types';
+export type { AiClient, AiOptions, AiTier } from '../types';
 
 type ClaudeImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
 
-export function claudeClient(apiKey: string, defaultTier: Tier = 'balanced'): AiClient {
+export function claudeClient(apiKey: string, defaultTier: AiTier = 'balanced'): AiClient {
   const client = new Anthropic({ apiKey });
+
+  function resolveModel(options?: AiOptions): string {
+    return AI_MODELS.anthropic[options?.tier ?? defaultTier];
+  }
 
   function buildSystemBlocks(options?: AiOptions): Anthropic.TextBlockParam[] {
     if (!options?.systemPrompt) return [];
     return [{ type: 'text', text: options.systemPrompt, cache_control: { type: 'ephemeral' } }];
-  }
-
-  function buildBaseParams(options?: AiOptions) {
-    return {
-      model: resolveClaudeModel(options?.tier ?? defaultTier),
-      max_tokens: options?.maxTokens ?? 1024,
-      ...(options?.temperature !== undefined && { temperature: options.temperature }),
-    };
   }
 
   function extractText(response: Anthropic.Message): string {
@@ -34,7 +30,9 @@ export function claudeClient(apiKey: string, defaultTier: Tier = 'balanced'): Ai
     async complete(prompt, options) {
       const systemBlocks = buildSystemBlocks(options);
       const response = await client.messages.create({
-        ...buildBaseParams(options),
+        model: resolveModel(options),
+        max_tokens: options?.maxTokens ?? 1024,
+        ...(options?.temperature !== undefined && { temperature: options.temperature }),
         ...(systemBlocks.length > 0 && { system: systemBlocks }),
         messages: [{ role: 'user', content: prompt }],
       });
@@ -44,7 +42,9 @@ export function claudeClient(apiKey: string, defaultTier: Tier = 'balanced'): Ai
     async completeWithImage(prompt, imageBase64, mimeType, options) {
       const systemBlocks = buildSystemBlocks(options);
       const response = await client.messages.create({
-        ...buildBaseParams(options),
+        model: resolveModel(options),
+        max_tokens: options?.maxTokens ?? 1024,
+        ...(options?.temperature !== undefined && { temperature: options.temperature }),
         ...(systemBlocks.length > 0 && { system: systemBlocks }),
         messages: [
           {

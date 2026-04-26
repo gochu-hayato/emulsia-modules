@@ -1,7 +1,9 @@
-export type Tier = 'heavy' | 'balanced' | 'lite';
+import type { AiTier } from './config';
+
+export type { AiTier, AiProvider } from './config';
 
 export interface AiOptions {
-  tier?: Tier;
+  tier?: AiTier;
   systemPrompt?: string;
   maxTokens?: number;
   temperature?: number;

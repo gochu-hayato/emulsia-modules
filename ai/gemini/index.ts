@@ -1,15 +1,15 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import type { AiClient, AiOptions, Tier } from '../types';
-import { resolveGeminiModel } from '../config';
+import { AI_MODELS } from '../config';
+import type { AiClient, AiOptions, AiTier } from '../types';
 
-export type { AiClient, AiOptions, Tier } from '../types';
+export type { AiClient, AiOptions, AiTier } from '../types';
 
-export function geminiClient(apiKey: string, defaultTier: Tier = 'balanced'): AiClient {
+export function geminiClient(apiKey: string, defaultTier: AiTier = 'balanced'): AiClient {
   const genAI = new GoogleGenerativeAI(apiKey);
 
   function getModel(options?: AiOptions) {
     return genAI.getGenerativeModel({
-      model: resolveGeminiModel(options?.tier ?? defaultTier),
+      model: AI_MODELS.gemini[options?.tier ?? defaultTier],
       ...(options?.systemPrompt ? { systemInstruction: options.systemPrompt } : {}),
       generationConfig: {
         ...(options?.maxTokens !== undefined ? { maxOutputTokens: options.maxTokens } : {}),

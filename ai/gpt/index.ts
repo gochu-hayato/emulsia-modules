@@ -1,19 +1,14 @@
 import OpenAI from 'openai';
-import type { AiClient, AiOptions, Tier } from '../types';
-import { resolveGptModel } from '../config';
+import { AI_MODELS } from '../config';
+import type { AiClient, AiOptions, AiTier } from '../types';
 
-export type { AiClient, AiOptions, Tier } from '../types';
+export type { AiClient, AiOptions, AiTier } from '../types';
 
-export function gptClient(apiKey: string, defaultTier: Tier = 'balanced'): AiClient {
+export function gptClient(apiKey: string, defaultTier: AiTier = 'balanced'): AiClient {
   const client = new OpenAI({ apiKey });
 
-  function buildMessages(prompt: string, options?: AiOptions): OpenAI.ChatCompletionMessageParam[] {
-    const messages: OpenAI.ChatCompletionMessageParam[] = [];
-    if (options?.systemPrompt) {
-      messages.push({ role: 'system', content: options.systemPrompt });
-    }
-    messages.push({ role: 'user', content: prompt });
-    return messages;
+  function resolveModel(options?: AiOptions): string {
+    return AI_MODELS.openai[options?.tier ?? defaultTier];
   }
 
   function extractContent(response: OpenAI.ChatCompletion): string {
@@ -26,9 +21,15 @@ export function gptClient(apiKey: string, defaultTier: Tier = 'balanced'): AiCli
 
   return {
     async complete(prompt, options) {
+      const messages: OpenAI.ChatCompletionMessageParam[] = [];
+      if (options?.systemPrompt) {
+        messages.push({ role: 'system', content: options.systemPrompt });
+      }
+      messages.push({ role: 'user', content: prompt });
+
       const response = await client.chat.completions.create({
-        model: resolveGptModel(options?.tier ?? defaultTier),
-        messages: buildMessages(prompt, options),
+        model: resolveModel(options),
+        messages,
         ...(options?.maxTokens !== undefined && { max_tokens: options.maxTokens }),
         ...(options?.temperature !== undefined && { temperature: options.temperature }),
       });
@@ -52,7 +53,7 @@ export function gptClient(apiKey: string, defaultTier: Tier = 'balanced'): AiCli
       });
 
       const response = await client.chat.completions.create({
-        model: resolveGptModel(options?.tier ?? defaultTier),
+        model: resolveModel(options),
         messages,
         ...(options?.maxTokens !== undefined && { max_tokens: options.maxTokens }),
         ...(options?.temperature !== undefined && { temperature: options.temperature }),
