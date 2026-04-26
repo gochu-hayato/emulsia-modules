@@ -1,31 +1,41 @@
 # data/audit-log
 
-Firestore の `audit_logs` コレクションへの操作ログ自動記録モジュール。
-`emulsia-build-template` の audit 実装をモジュールとして切り出したもの。
+## 概要
 
-## Firestoreスキーマ
+Firestore の `audit_logs` コレクションへの操作ログ自動記録モジュール。`emulsia-build-template` の audit 実装をモジュールとして切り出したもの。
 
-コレクション: `audit_logs/{auto-id}`
+## インストール
 
-| フィールド     | 型         | 説明                          |
-|--------------|------------|------------------------------|
-| orgId        | string     | 組織ID                        |
-| userId       | string     | 操作者のUID                   |
-| action       | string     | `'create' \| 'update' \| 'delete'` |
-| collection   | string     | 操作対象のコレクション名        |
-| documentId   | string     | 操作対象のドキュメントID        |
-| changedFields | string[]  | 変更されたフィールド名（任意）   |
-| createdAt    | Timestamp  | サーバータイムスタンプ          |
+```bash
+npm install firebase-admin
+```
 
-## API
+## 使い方
+
+```typescript
+import { recordAuditLog, getAuditLogs } from './data/audit-log';
+
+// ログ書き込み
+await recordAuditLog({
+  orgId: 'org-123',
+  userId: 'uid-abc',
+  action: 'update',
+  collection: 'orders',
+  documentId: 'order-xyz',
+  changedFields: ['status', 'updatedAt'],
+});
+
+// ログ取得
+const logs = await getAuditLogs('org-123', { action: 'delete', limit: 20 });
+```
 
 ### `recordAuditLog(params: AuditLogParams): Promise<void>`
 
-`audit_logs` に1件書き込む。`createdAt` はサーバータイムスタンプを使用。
+`audit_logs` に 1 件書き込む。`createdAt` はサーバータイムスタンプ。
 
 ### `getAuditLogs(orgId: string, options?: GetAuditLogsOptions): Promise<AuditLog[]>`
 
-`orgId` に紐づくログを取得する。`createdAt` 降順。
+`orgId` に紐づくログを `createdAt` 降順で取得する。
 
 ```typescript
 interface GetAuditLogsOptions {
@@ -37,25 +47,7 @@ interface GetAuditLogsOptions {
 }
 ```
 
-## 使用例
+## 注意事項
 
-```typescript
-import { recordAuditLog, getAuditLogs } from './data/audit-log';
-
-// 書き込み
-await recordAuditLog({
-  orgId: 'org-123',
-  userId: 'uid-abc',
-  action: 'update',
-  collection: 'orders',
-  documentId: 'order-xyz',
-  changedFields: ['status', 'updatedAt'],
-});
-
-// 取得
-const logs = await getAuditLogs('org-123', { action: 'delete', limit: 20 });
-```
-
-## 注意
-
-複数フィールドでのフィルタリングと `createdAt` の `orderBy` を組み合わせる場合は、Firestore に複合インデックスが必要。
+- 複数フィールドでのフィルタリングと `createdAt` の `orderBy` を組み合わせる場合は、Firestore に複合インデックスが必要。
+- `firebase-admin` の初期化済みアプリが存在すること。

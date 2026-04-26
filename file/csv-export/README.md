@@ -1,20 +1,17 @@
 # file/csv-export
 
-PapaParse を使った CSV 書き出しモジュール。BOM 付き UTF-8 で Excel の文字化けを防ぐ。
+## 概要
 
-## API
+PapaParse を使った CSV 書き出しモジュール。BOM 付き UTF-8 で出力するため Excel での文字化けを防ぐ。サーバー（文字列生成）とブラウザ（ファイルダウンロード）の両方に対応。
 
-### `generateCsvString<T extends object>(data: T[]): string`
+## インストール
 
-オブジェクト配列を BOM 付き CSV 文字列に変換する（サーバー・Cloud Functions 用）。
-オブジェクトのキーがヘッダー行になる。
+```bash
+npm install papaparse
+npm install --save-dev @types/papaparse
+```
 
-### `exportToCsv<T extends object>(data: T[], filename: string): void`
-
-ブラウザでCSVファイルをダウンロードさせる（ブラウザ専用）。
-拡張子 `.csv` が付いていない場合は自動付与する。
-
-## 使用例
+## 使い方
 
 ```typescript
 import { generateCsvString, exportToCsv } from './file/csv-export';
@@ -24,10 +21,23 @@ const data = [
   { 名前: '鈴木花子', 年齢: 25, 部署: '営業' },
 ];
 
-// ブラウザでダウンロード
+// ブラウザでファイルダウンロード
 exportToCsv(data, 'users');
 
-// サーバーでCSV文字列生成
+// サーバーで CSV 文字列生成（Cloud Functions など）
 const csv = generateCsvString(data);
 // → '﻿名前,年齢,部署\r\n山田太郎,30,開発\r\n...'
 ```
+
+### `generateCsvString<T extends object>(data: T[]): string`
+
+オブジェクト配列を BOM 付き CSV 文字列に変換する（サーバー用）。
+
+### `exportToCsv<T extends object>(data: T[], filename: string): void`
+
+ブラウザでCSVファイルをダウンロードさせる（ブラウザ専用）。拡張子 `.csv` が付いていない場合は自動付与する。
+
+## 注意事項
+
+- `exportToCsv` は `document` を使用するためブラウザ環境専用。サーバー側では `generateCsvString` を使うこと。
+- オブジェクトのキーがそのままヘッダー行になる。

@@ -1,22 +1,18 @@
 # location/geocoding
 
-Google Maps Geocoding API を `fetch` で直接呼び出すジオコーディングモジュール。
+## 概要
 
-## API
+Google Maps Geocoding API を `fetch` で直接呼び出すジオコーディングモジュール。住所 ↔ 緯度経度の相互変換に対応。
 
-### `geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number }>`
+## インストール
 
-住所文字列を緯度・経度に変換する。
+```bash
+npm install --save-dev @types/node
+```
 
-- 変換失敗時 → `Error` をthrow（日本語メッセージ）
+外部パッケージは不要。Google Maps Geocoding API キーを別途取得すること。
 
-### `reverseGeocode(lat: number, lng: number, apiKey: string): Promise<string>`
-
-緯度・経度を住所文字列（`formatted_address`）に変換する。
-
-- 変換失敗時 → `Error` をthrow（日本語メッセージ）
-
-## 使用例
+## 使い方
 
 ```typescript
 import { geocodeAddress, reverseGeocode } from './location/geocoding';
@@ -30,8 +26,16 @@ const address = await reverseGeocode(35.6762, 139.6503, apiKey);
 // → '日本、〒150-0001 東京都渋谷区神宮前...'
 ```
 
-## 前提
+### `geocodeAddress(address: string, apiKey: string): Promise<{ lat: number; lng: number }>`
 
-- Google Maps Geocoding API が有効化済みのプロジェクト
-- APIキーはコードにハードコードせず、環境変数やシークレット管理で取得すること
-- Cloud Functions から使用する場合、Geocoding API へのアウトバウンド通信が許可されていること（Spark プランは不可）
+住所文字列を緯度・経度に変換する。変換失敗時は `Error` をthrow。
+
+### `reverseGeocode(lat: number, lng: number, apiKey: string): Promise<string>`
+
+緯度・経度を住所文字列（`formatted_address`）に変換する。変換失敗時は `Error` をthrow。
+
+## 注意事項
+
+- API キーはコードにハードコードせず、環境変数やシークレット管理から取得すること。
+- Cloud Functions から使用する場合、Geocoding API へのアウトバウンド通信が許可されていること（Spark プランは不可）。
+- Google Maps Platform で Geocoding API が有効化済みであること。

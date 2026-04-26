@@ -1,18 +1,17 @@
 # file/csv-import
 
-PapaParse を使った CSV 読み込みモジュール。1行目をヘッダーとして扱いオブジェクト配列に変換する。
+## 概要
 
-## API
+PapaParse を使った CSV 読み込みモジュール。1行目をヘッダーとして扱いオブジェクト配列に変換する。サーバー（同期）とブラウザ（非同期 File API）の両方に対応。
 
-### `parseCsvString<T>(csv: string): T[]`
+## インストール
 
-CSV 文字列をパースしてオブジェクト配列を返す（同期・サーバー用）。
+```bash
+npm install papaparse
+npm install --save-dev @types/papaparse
+```
 
-### `parseCsv<T>(file: File): Promise<T[]>`
-
-ブラウザの `File` オブジェクトを非同期でパースする（ブラウザ用）。
-
-## 使用例
+## 使い方
 
 ```typescript
 import { parseCsvString, parseCsv } from './file/csv-import';
@@ -23,26 +22,26 @@ interface User {
   部署: string;
 }
 
-// CSV文字列から（サーバー用）
+// CSV 文字列から（サーバー用）
 const csv = '名前,年齢,部署\n山田太郎,30,開発\n鈴木花子,25,営業';
 const users = parseCsvString<User>(csv);
 
-// ブラウザのFileから
+// ブラウザの File オブジェクトから
 const handleFile = async (file: File) => {
   const users = await parseCsv<User>(file);
-  console.log(users);
 };
 ```
 
-## csv-export との連携
+### `parseCsvString<T>(csv: string): T[]`
 
-```typescript
-import { generateCsvString } from '../csv-export';
-import { parseCsvString } from '../csv-import';
+CSV 文字列をパースしてオブジェクト配列を返す（同期・サーバー用）。
 
-const original = [{ name: 'Alice', score: 100 }];
-const csv = generateCsvString(original);
-// BOMを除去してからparse（parseCsvStringはBOMを自動無視）
-const parsed = parseCsvString(csv);
-// → original と一致
-```
+### `parseCsv<T>(file: File): Promise<T[]>`
+
+ブラウザの `File` オブジェクトを非同期でパースする（ブラウザ用）。
+
+## 注意事項
+
+- `parseCsv` は `File` API を使用するためブラウザ環境専用。サーバー側では `parseCsvString` を使うこと。
+- `csv-export` の `generateCsvString` が付与する BOM は自動的に無視される。
+- 数値フィールドも文字列として返るため、必要に応じて変換すること。

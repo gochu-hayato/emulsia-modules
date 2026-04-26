@@ -1,33 +1,31 @@
 # notification/email
 
-Resendを使ったメール送信モジュール。Cloud Functions Gen2から呼び出す。
+## 概要
 
-## セットアップ
+Resend を使ったメール送信モジュール。招待メール・通知メールの HTML テンプレートを同梱。Cloud Functions Gen2 から呼び出す前提。
 
-### 1. シークレット登録
+## インストール
 
 ```bash
+npm install resend
 firebase functions:secrets:set RESEND_API_KEY
 ```
 
-### 2. Cloud Functions でシークレットを宣言
+## 使い方
 
 ```typescript
 import { onCall } from 'firebase-functions/v2/https';
-import { sendEmail, resendApiKeySecret } from './notification/email';
+import { sendEmail, resendApiKeySecret, inviteEmailTemplate } from './notification/email';
 
-export const myFunction = onCall({ secrets: [resendApiKeySecret] }, async (request) => {
-  await sendEmail({ to: 'user@example.com', subject: '件名', html: '<p>本文</p>' });
+export const sendInvite = onCall({ secrets: [resendApiKeySecret] }, async (request) => {
+  const html = inviteEmailTemplate('My Org', 'https://app.example.com/invite?token=xxx');
+  await sendEmail({ to: 'user@example.com', subject: 'My Org への招待', html });
 });
 ```
 
-`resendApiKeySecret` を `secrets` 配列に含めることで、実行時に `RESEND_API_KEY` が自動的に注入される。
-
-## API
-
 ### `sendEmail(params: SendEmailParams): Promise<void>`
 
-メールを送信する。`RESEND_API_KEY` が未設定の場合は `Error` をthrowする。
+メールを送信する。`RESEND_API_KEY` が未設定の場合は `Error` をthrow。
 
 ```typescript
 interface SendEmailParams {
@@ -40,37 +38,17 @@ interface SendEmailParams {
 
 ### `inviteEmailTemplate(orgName: string, inviteUrl: string): string`
 
-招待メール用のHTMLを生成する。
+招待メール用の HTML を生成する。
 
 ### `notificationEmailTemplate(title: string, body: string): string`
 
-通知メール用のHTMLを生成する。
+通知メール用の HTML を生成する。
 
-## エクスポート
+### `resendApiKeySecret`
 
-| 名前 | 種別 | 説明 |
-|------|------|------|
-| `sendEmail` | 関数 | メール送信 |
-| `resendApiKeySecret` | SecretParam | Cloud Functions の `secrets` 配列に渡す |
-| `inviteEmailTemplate` | 関数 | 招待メールHTMLテンプレート |
-| `notificationEmailTemplate` | 関数 | 通知メールHTMLテンプレート |
-| `SendEmailParams` | 型 | sendEmailの引数型 |
+Cloud Functions の `secrets` 配列に渡す `SecretParam`。
 
-## 使用例
+## 注意事項
 
-```typescript
-import {
-  sendEmail,
-  resendApiKeySecret,
-  inviteEmailTemplate,
-  notificationEmailTemplate,
-} from './notification/email';
-
-// 招待メール
-const html = inviteEmailTemplate('My Org', 'https://app.example.com/invite?token=xxx');
-await sendEmail({ to: 'user@example.com', subject: 'My Org への招待', html });
-
-// 通知メール
-const html2 = notificationEmailTemplate('申請が承認されました', '<p>申請内容が承認されました。</p>');
-await sendEmail({ to: 'user@example.com', subject: '申請承認のお知らせ', html: html2 });
-```
+- `resendApiKeySecret` を Cloud Functions の `secrets` 配列に含めることで、実行時に `RESEND_API_KEY` が自動注入される。
+- `from` のデフォルト値（`noreply@emulsia.jp`）は Resend で送信ドメインとして認証済みであること。
