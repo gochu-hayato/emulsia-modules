@@ -6,6 +6,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noImplicitReturns": true,
+    "jsx": "react-jsx",
     "outDir": "dist"
   },
   "include": ["**/*.ts", "**/*.tsx"],
