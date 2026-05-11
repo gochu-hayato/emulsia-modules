@@ -1,0 +1,107 @@
+import {
+  getFirestore,
+  FieldValue,
+  WithFieldValue,
+} from 'firebase-admin/firestore';
+import { DocumentSnapshot } from 'firebase-functions/v2/firestore';
+import { log } from '../shared/logger';
+import { AuditLogData, RevisionData } from '../shared/types';
+import {
+  ENABLE_AUDIT_LOGS,
+  EXCLUDED_FIELDS,
+  WRITE_REVISION_SNAPSHOTS,
+} from './config';
+
+export type AuditAction = 'create' | 'update' | 'delete';
+
+const ALWAYS_IGNORED_FIELDS = ['updatedAt', 'createdAt'];
+
+export async function recordAudit(params: {
+  before: DocumentSnapshot | undefined;
+  after: DocumentSnapshot | undefined;
+  collection: string;
+  documentId: string;
+}): Promise<void> {
+  if (!ENABLE_AUDIT_LOGS) return;
+
+  const { before, after, collection, documentId } = params;
+  const db = getFirestore();
+
+  const action: AuditAction =
+    !before?.exists ? 'create' : !after?.exists ? 'delete' : 'update';
+
+  const afterData = after?.data();
+  const beforeData = before?.data();
+
+  const orgId = (afterData?.orgId ?? beforeData?.orgId) as string | undefined;
+  if (!orgId) {
+    log.warn('orgId not found, skipping audit', { collection, documentId });
+    return;
+  }
+
+  const userId = (afterData?.updatedBy ??
+    afterData?.createdBy ??
+    beforeData?.updatedBy ??
+    beforeData?.createdBy) as string | undefined;
+  if (!userId) {
+    log.warn('userId not found, skipping audit', { collection, documentId });
+    return;
+  }
+
+  const changedFields: string[] = [];
+  if (action === 'update' && beforeData && afterData) {
+    const allKeys = new Set([
+      ...Object.keys(beforeData),
+      ...Object.keys(afterData),
+    ]);
+    for (const key of allKeys) {
+      if (EXCLUDED_FIELDS.includes(key)) continue;
+      if (ALWAYS_IGNORED_FIELDS.includes(key)) continue;
+      if (JSON.stringify(beforeData[key]) !== JSON.stringify(afterData[key])) {
+        changedFields.push(key);
+      }
+    }
+  }
+
+  // TODO(iso-phase2): audit 記録失敗時のリトライ・DLQ未実装。
+  // Firestore Trigger では書き込み前拒否不可のため、
+  // 失敗時は元データは残りつつ audit_logs だけ欠損する可能性がある。
+  // Phase 2 で DLQ またはリトライキューを実装予定。
+  try {
+    const auditLog: WithFieldValue<AuditLogData> = {
+      orgId,
+      action,
+      collection,
+      documentId,
+      userId,
+      timestamp: FieldValue.serverTimestamp(),
+      changedFields: changedFields.length > 0 ? changedFields : undefined,
+    };
+    await db.collection('audit_logs').add(auditLog);
+
+    if (WRITE_REVISION_SNAPSHOTS && action !== 'create' && beforeData) {
+      const revision: WithFieldValue<RevisionData> = {
+        orgId,
+        collection,
+        documentId,
+        previousData: Object.fromEntries(
+          Object.entries(beforeData).filter(
+            ([k]) => !EXCLUDED_FIELDS.includes(k)
+          )
+        ),
+        changedFields,
+        changedBy: userId,
+        changedAt: FieldValue.serverTimestamp(),
+      };
+      await db
+        .collection(collection)
+        .doc(documentId)
+        .collection('revisions')
+        .add(revision);
+    }
+
+    log.info('Audit recorded', { action, collection, documentId, userId });
+  } catch (err) {
+    log.error('Failed to record audit', err, { collection, documentId });
+  }
+}

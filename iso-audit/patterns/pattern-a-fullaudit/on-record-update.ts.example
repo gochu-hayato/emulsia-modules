@@ -1,0 +1,49 @@
+import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { onDocumentUpdated } from 'firebase-functions/v2/firestore';
+import { log } from '../shared/logger';
+import { ENABLE_RECORD_HISTORY } from './config';
+
+export const onRecordUpdate = onDocumentUpdated(
+  { document: 'records/{recordId}', region: 'asia-northeast1' },
+  async (event) => {
+    if (!ENABLE_RECORD_HISTORY) return;
+
+    const after = event.data?.after;
+    if (!after?.exists) return;
+
+    const afterData = after.data() as Record<string, unknown> | undefined;
+    if (!afterData) return;
+
+    const before = event.data?.before;
+    if (!before?.exists) return;
+
+    const recordId = event.params.recordId;
+    const orgId = afterData.orgId;
+    if (typeof orgId !== 'string' || orgId.length === 0) {
+      log.warn('onRecordUpdate: orgId missing', { recordId });
+      return;
+    }
+
+    const versionId = Date.now().toString();
+    const db = getFirestore();
+
+    try {
+      // 更新「後」の状態を保存する。before のみだと次回更新まで当該編集内容が履歴に現れないため。
+      await db
+        .collection('records')
+        .doc(recordId)
+        .collection('history')
+        .doc(versionId)
+        .set({
+          orgId,
+          recordId,
+          versionId,
+          snapshot: afterData,
+          capturedAt: FieldValue.serverTimestamp(),
+        });
+      log.info('onRecordUpdate: history created', { recordId, versionId });
+    } catch (error) {
+      log.error('onRecordUpdate: history creation failed', error, { recordId, versionId });
+    }
+  }
+);
