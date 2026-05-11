@@ -1,0 +1,444 @@
+'use client';
+
+import { Timestamp, type Timestamp as FirestoreTimestamp } from 'firebase/firestore';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { where } from 'firebase/firestore';
+import { AccessDeniedNotice } from '@/components/common/AccessDeniedNotice';
+import Loading from '@/components/common/Loading';
+import { usePermission } from '@/hooks/usePermission';
+import { getOne, getSubcollectionAll } from '@/lib/firestore';
+import type { RecordDocument } from '@/types/firestore';
+
+const FIELD_LABELS = {
+  subject: '対象',
+  content: '内容',
+  category: 'カテゴリ',
+} as const;
+
+type DiffFieldKey = keyof typeof FIELD_LABELS;
+
+type NormalizedSnapshot = {
+  id: string;
+  capturedAt: Timestamp;
+  lastEditedByName: string;
+  lastEditReason: string;
+  category: string;
+  subject: string;
+  content: string;
+};
+
+type TimelineRow = NormalizedSnapshot & {
+  isInitial: boolean;
+  changeCount: number;
+  headerReason: string;
+  diffs: { fieldKey: DiffFieldKey; fieldLabel: string; before: string; after: string }[];
+};
+
+export type FirestoreHistoryInput = Record<string, unknown> & { id: string };
+
+function isTimestamp(value: unknown): value is FirestoreTimestamp {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as FirestoreTimestamp).toMillis === 'function' &&
+    typeof (value as FirestoreTimestamp).toDate === 'function'
+  );
+}
+
+/** Cloud Functions が versionId / ドキュメントIDに Date.now() を使う場合のフォールバック込み */
+function resolveCapturedAt(doc: FirestoreHistoryInput): FirestoreTimestamp {
+  const raw = doc.capturedAt ?? doc.editedAt ?? doc.createdAt;
+  if (isTimestamp(raw)) return raw;
+  const versionKey =
+    typeof doc.versionId === 'string' && doc.versionId.length > 0 ? doc.versionId : doc.id;
+  if (/^\d+$/.test(versionKey)) {
+    const ms = parseInt(versionKey, 10);
+    if (!Number.isNaN(ms) && ms > 0) {
+      return Timestamp.fromMillis(ms);
+    }
+  }
+  return Timestamp.fromMillis(0);
+}
+
+function readString(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  return typeof v === 'string' ? v : '';
+}
+
+function snapshotRecordToNormalized(
+  id: string,
+  capturedAt: FirestoreTimestamp,
+  snap: Record<string, unknown>
+): NormalizedSnapshot {
+  const lastEditedByName =
+    readString(snap, 'lastEditedByName') || readString(snap, 'createdByName') || '—';
+  const rawReason = snap.lastEditReason;
+  const lastEditReason =
+    typeof rawReason === 'string' && rawReason.trim().length > 0 ? rawReason.trim() : '';
+  return {
+    id,
+    capturedAt,
+    lastEditedByName,
+    lastEditReason,
+    category: readString(snap, 'category'),
+    subject: readString(snap, 'subject'),
+    content: readString(snap, 'content'),
+  };
+}
+
+/** Firestore の snapshot 型・フラット型の両方を履歴1件に正規化する */
+export function parseHistoryDocument(doc: FirestoreHistoryInput): NormalizedSnapshot | null {
+  const capturedAt = resolveCapturedAt(doc);
+
+  const snapUnknown = doc.snapshot;
+  if (snapUnknown !== undefined && typeof snapUnknown === 'object' && snapUnknown !== null) {
+    return snapshotRecordToNormalized(doc.id, capturedAt, snapUnknown as Record<string, unknown>);
+  }
+
+  const hasFlatContent =
+    typeof doc.subject === 'string' ||
+    typeof doc.content === 'string' ||
+    typeof doc.category === 'string';
+  if (!hasFlatContent) {
+    return null;
+  }
+
+  return {
+    id: doc.id,
+    capturedAt,
+    lastEditedByName: typeof doc.editedBy === 'string' && doc.editedBy.length > 0 ? doc.editedBy : '—',
+    lastEditReason:
+      typeof doc.editReason === 'string' && doc.editReason.trim().length > 0
+        ? doc.editReason.trim()
+        : '更新',
+    category: typeof doc.category === 'string' ? doc.category : '',
+    subject: typeof doc.subject === 'string' ? doc.subject : '',
+    content: typeof doc.content === 'string' ? doc.content : '',
+  };
+}
+
+function formatCapturedAt(ts: FirestoreTimestamp): string {
+  const d = ts.toDate();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const h = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+  return `${y}-${m}-${day} ${h}:${min}`;
+}
+
+function computeDiffs(
+  prev: NormalizedSnapshot,
+  curr: NormalizedSnapshot
+): { fieldKey: DiffFieldKey; fieldLabel: string; before: string; after: string }[] {
+  const keys: DiffFieldKey[] = ['subject', 'content', 'category'];
+  const out: { fieldKey: DiffFieldKey; fieldLabel: string; before: string; after: string }[] = [];
+  for (const key of keys) {
+    if (prev[key] !== curr[key]) {
+      const before = prev[key].length > 0 ? prev[key] : '（空）';
+      const after = curr[key].length > 0 ? curr[key] : '（空）';
+      out.push({ fieldKey: key, fieldLabel: FIELD_LABELS[key], before, after });
+    }
+  }
+  return out;
+}
+
+function buildTimelineRows(chronologicalAsc: NormalizedSnapshot[]): TimelineRow[] {
+  return chronologicalAsc.map((entry, index) => {
+    const isInitial = index === 0;
+    if (isInitial) {
+      return {
+        ...entry,
+        isInitial,
+        changeCount: 0,
+        // 履歴は「更新後」のスナップショットで積まれるため、先頭は作成直後ではなく最初に記録された時点の内容
+        headerReason: '履歴の起点（当時の保存内容）',
+        diffs: [],
+      };
+    }
+    const prev = chronologicalAsc[index - 1]!;
+    const diffs = computeDiffs(prev, entry);
+    const headerReason =
+      entry.lastEditReason.length > 0 ? entry.lastEditReason : '更新';
+    return {
+      ...entry,
+      isInitial,
+      changeCount: diffs.length,
+      headerReason,
+      diffs,
+    };
+  });
+}
+
+type HistoryClientProps = {
+  record: { id: string; subject: string };
+  historyDocuments: FirestoreHistoryInput[];
+};
+
+export function HistoryClient({ record, historyDocuments }: HistoryClientProps): ReactElement {
+  const chronologicalAsc = useMemo(() => {
+    const parsed = historyDocuments
+      .map((d) => parseHistoryDocument(d))
+      .filter((x): x is NormalizedSnapshot => x !== null)
+      .sort((a, b) => {
+        const diff = a.capturedAt.toMillis() - b.capturedAt.toMillis();
+        if (diff !== 0) return diff;
+        return a.id.localeCompare(b.id);
+      });
+    return parsed;
+  }, [historyDocuments]);
+
+  const rowsAsc = useMemo(() => buildTimelineRows(chronologicalAsc), [chronologicalAsc]);
+  const rowsNewestFirst = useMemo(() => [...rowsAsc].reverse(), [rowsAsc]);
+
+  const newestId = rowsNewestFirst[0]?.id ?? null;
+  const [expandedOverride, setExpandedOverride] = useState<Record<string, boolean>>({});
+
+  const isExpanded = useCallback(
+    (id: string): boolean => {
+      if (expandedOverride[id] !== undefined) {
+        return expandedOverride[id]!;
+      }
+      return id === newestId;
+    },
+    [expandedOverride, newestId]
+  );
+
+  const toggleRow = useCallback((id: string): void => {
+    setExpandedOverride((prev) => {
+      const current = prev[id] !== undefined ? prev[id]! : id === newestId;
+      return { ...prev, [id]: !current };
+    });
+  }, [newestId]);
+
+  return (
+    <section className="animate-fade-in space-y-6 p-4 md:p-10" data-testid="records-history-page">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs text-slate-500">業務記録 / 履歴差分</p>
+          <h2 className="mt-1 text-xl font-bold leading-snug text-slate-900 md:text-2xl">
+            {record.subject}
+          </h2>
+        </div>
+        <Link
+          href={`/records/${record.id}`}
+          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-150 hover:bg-slate-50 active:scale-[0.98] motion-reduce:transition-none"
+        >
+          詳細へ戻る
+        </Link>
+      </div>
+
+      {rowsNewestFirst.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+          履歴がありません。編集が行われるとここに表示されます。
+        </div>
+      ) : (
+        <div className="relative">
+          <ul className="space-y-0">
+            {rowsNewestFirst.map((row, index) => {
+              const expanded = isExpanded(row.id);
+              const isLast = index === rowsNewestFirst.length - 1;
+              return (
+                <li key={row.id} className="relative">
+                  {!isLast ? (
+                    <div
+                      className="absolute left-[11px] top-8 bottom-0 w-0.5 bg-slate-200"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <div className="relative flex gap-4 pb-10">
+                    <div className="relative z-10 flex shrink-0 flex-col items-center pt-1.5">
+                      <span
+                        className={`h-6 w-6 shrink-0 rounded-full border-2 bg-white ${
+                          index === 0 ? 'border-cyan' : 'border-slate-300'
+                        }`}
+                        aria-hidden
+                      />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          toggleRow(row.id);
+                        }}
+                        className="flex w-full flex-col gap-2 rounded-lg border border-transparent p-2 text-left transition-colors duration-150 hover:border-slate-200 hover:bg-slate-50 focus:border-cyan focus:outline-none focus:ring-2 focus:ring-cyan/20 motion-reduce:transition-none"
+                        aria-expanded={expanded}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0 space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">{row.lastEditedByName}</p>
+                            <p className="text-xs text-slate-500">{formatCapturedAt(row.capturedAt)}</p>
+                            <p className="text-xs text-slate-600">
+                              理由: {row.headerReason}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {row.isInitial ? (
+                              <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                                初回
+                              </span>
+                            ) : (
+                              <span className="rounded-full border border-cyan/40 bg-cyan/10 px-2.5 py-0.5 text-xs font-semibold text-cyan-deep">
+                                {row.changeCount}件変更
+                              </span>
+                            )}
+                            {expanded ? (
+                              <ChevronDown className="h-4 w-4 text-slate-500" aria-hidden />
+                            ) : (
+                              <ChevronRight className="h-4 w-4 text-slate-500" aria-hidden />
+                            )}
+                          </div>
+                        </div>
+                      </button>
+
+                      {expanded ? (
+                        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-4 md:p-6">
+                          {row.isInitial ? (
+                            <p className="text-sm text-slate-600">
+                              この時点のスナップショットが基準です。
+                            </p>
+                          ) : row.diffs.length === 0 ? (
+                            <p className="text-sm text-slate-600">
+                              対象・内容・カテゴリに変更はありません。
+                            </p>
+                          ) : (
+                            <ul className="space-y-4">
+                              {row.diffs.map((d) => (
+                                <li key={d.fieldKey}>
+                                  <p className="mb-2 text-sm font-semibold text-slate-800">{d.fieldLabel}</p>
+                                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-3">
+                                    <span className="inline-block max-w-full rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800 line-through whitespace-pre-wrap">
+                                      {d.before}
+                                    </span>
+                                    <span
+                                      className="py-0.5 text-center text-slate-400 sm:shrink-0 sm:self-start sm:pt-2 sm:text-left"
+                                      aria-hidden
+                                    >
+                                      →
+                                    </span>
+                                    <span className="inline-block max-w-full rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 whitespace-pre-wrap sm:min-w-0 sm:flex-1">
+                                      {d.after}
+                                    </span>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RecordHistoryInner(): ReactElement {
+  const params = useParams<{ id: string }>();
+  const { canRead } = usePermission('records');
+  const [record, setRecord] = useState<{ id: string; subject: string } | null>(null);
+  const [historyDocuments, setHistoryDocuments] = useState<FirestoreHistoryInput[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!canRead) {
+      setRecord(null);
+      setHistoryDocuments([]);
+      setLoading(false);
+      return;
+    }
+    const load = async (): Promise<void> => {
+      setLoading(true);
+      try {
+        const recordDoc = await getOne<RecordDocument>('records', params.id);
+        if (recordDoc) {
+          setRecord({ id: recordDoc.id, subject: recordDoc.subject });
+          try {
+            const historyDocs = await getSubcollectionAll<FirestoreHistoryInput>(
+              'records',
+              params.id,
+              'history',
+              where('orgId', '==', recordDoc.orgId)
+            );
+            setHistoryDocuments(historyDocs);
+          } catch {
+            setHistoryDocuments([]);
+          }
+          return;
+        }
+        setRecord(null);
+        setHistoryDocuments([]);
+      } catch {
+        setHistoryDocuments([]);
+        setRecord(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    void load();
+  }, [params.id, canRead]);
+
+  if (!canRead) {
+    return (
+      <section className="p-4 md:p-10" data-testid="records-history-page">
+        <AccessDeniedNotice title="業務記録を閲覧する権限がありません。" />
+        <div className="mt-4">
+          <Link href="/records" className="text-sm font-semibold text-slate-700 underline">
+            一覧へ戻る
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  if (loading) {
+    return (
+      <section className="p-4 md:p-10">
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white">
+          <Loading />
+          <p className="text-sm text-slate-500">読み込み中...</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!record) {
+    return (
+      <section className="p-4 text-sm text-slate-500 md:p-10" data-testid="records-history-page">
+        履歴が見つかりません。
+        <div className="mt-2">
+          <Link href={`/records/${params.id}`} className="font-semibold text-slate-700 underline">
+            詳細へ戻る
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  return <HistoryClient record={record} historyDocuments={historyDocuments} />;
+}
+
+export default function RecordHistoryPage(): ReactElement {
+  return (
+    <Suspense
+      fallback={
+        <section className="p-4 md:p-10">
+          <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white">
+            <Loading />
+            <p className="text-sm text-slate-500">読み込み中...</p>
+          </div>
+        </section>
+      }
+    >
+      <RecordHistoryInner />
+    </Suspense>
+  );
+}

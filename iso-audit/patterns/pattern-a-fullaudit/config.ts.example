@@ -1,0 +1,35 @@
+/**
+ * 監査機能のオン/オフ。
+ * `false` の間は `recordAudit` が関数先頭で return し、`audit_logs` と
+ * `{collection}/{docId}/revisions/` のいずれにも書き込まない（テンプレ標準）。
+ */
+export const ENABLE_AUDIT_LOGS = false;
+
+/**
+ * `ENABLE_AUDIT_LOGS=true` のとき、変更前スナップショット（`revisions`）
+ * の書き込みだけを抑止するためのスイッチ。`audit_logs`（メタログ）は記録する。
+ */
+export const WRITE_REVISION_SNAPSHOTS = false;
+
+/**
+ * 監査対象のコレクション。
+ * BuildTemplate 標準では空（audit 機能は無効）。
+ *
+ * ISO 9001 / 27001 対応案件では、`.dev/rules/audit-logs.md` の手順に従って
+ * 案件側で対象コレクションを追加し、`functions/src/app/audit-triggers.ts` で
+ * 対応する trigger を定義する。
+ *
+ * audit_logs 自身と revisions サブコレクションは除外（無限ループ防止）。
+ */
+export const TRACKED_COLLECTIONS: readonly string[] = [];
+
+export const EXCLUDED_FIELDS = [
+  'password',
+  'secret',
+  'apiKey',
+  'token',
+  'refreshToken',
+  'accessToken',
+  'privateKey',
+  'clientSecret',
+];

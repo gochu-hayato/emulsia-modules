@@ -1,0 +1,39 @@
+import { onCall } from 'firebase-functions/v2/https';
+import { getFirestore, Timestamp } from 'firebase-admin/firestore';
+import { requireAdmin } from '../auth/verify-token';
+
+interface GetAuditLogsInput {
+  orgId: string;
+  startDate: string;
+  endDate: string;
+  collection?: string;
+  limit?: number;
+}
+
+export const getAuditLogs = onCall<GetAuditLogsInput>(
+  { region: 'asia-northeast1' },
+  async (req) => {
+    const { orgId, startDate, endDate, collection, limit = 100 } = req.data;
+
+    await requireAdmin(req, orgId);
+
+    const db = getFirestore();
+    let query = db
+      .collection('audit_logs')
+      .where('orgId', '==', orgId)
+      .where('timestamp', '>=', Timestamp.fromDate(new Date(startDate)))
+      .where('timestamp', '<=', Timestamp.fromDate(new Date(endDate)))
+      .orderBy('timestamp', 'desc')
+      .limit(Math.min(limit, 1000));
+
+    if (collection) {
+      query = query.where('collection', '==', collection);
+    }
+
+    const snapshot = await query.get();
+    return {
+      logs: snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })),
+      count: snapshot.size,
+    };
+  }
+);

@@ -1,0 +1,7 @@
+/**
+ * `records/{recordId}/history/{versionId}` への履歴書き込みのオン/オフ。
+ * `false` の間は `onRecordUpdate` が関数先頭で return し、history を書かない（テンプレ標準）。
+ *
+ * 業務記録の編集履歴 UI（`RecordHistoryPage`）が必要な案件は `true` に切り替える。
+ */
+export const ENABLE_RECORD_HISTORY = false;

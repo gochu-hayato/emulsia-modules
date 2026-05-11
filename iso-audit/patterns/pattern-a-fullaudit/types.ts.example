@@ -1,0 +1,23 @@
+import { Timestamp } from 'firebase-admin/firestore';
+
+export interface RevisionData {
+  orgId: string;
+  collection: string;
+  documentId: string;
+  previousData: Record<string, unknown>;
+  changedFields: string[];
+  changedBy: string;
+  changedAt: Timestamp;
+}
+
+export interface AuditLogData {
+  orgId: string;
+  action: 'create' | 'update' | 'delete';
+  collection: string;
+  documentId: string;
+  userId: string;
+  userRole?: string;
+  timestamp: Timestamp;
+  changedFields?: string[];
+  metadata?: Record<string, unknown>;
+}
