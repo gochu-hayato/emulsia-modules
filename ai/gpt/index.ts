@@ -60,5 +60,13 @@ export function gptClient(apiKey: string, defaultTier: AiTier = 'balanced'): AiC
       });
       return extractContent(response);
     },
+
+    async completeWithDocumentStructured() {
+      // OCR / 構造化抽出は Gemini / Claude 中心に運用しており、GPT は当面未使用。
+      // 必要になった時点で AI SDK (@ai-sdk/openai) で実装する（痛みベース）。
+      throw new Error(
+        'gptClient.completeWithDocumentStructured は当面未対応です。OCR は geminiClient / claudeClient を使用してください。',
+      );
+    },
   };
 }

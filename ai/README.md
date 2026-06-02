@@ -2,14 +2,17 @@
 
 ## 概要
 
-Gemini・Claude・GPT を統一インターフェース `AiClient` で扱うモジュール群。`complete`（テキスト生成）と `completeWithImage`（画像+テキスト生成）の2メソッドを共通 API として提供する。
+Gemini・Claude・GPT を統一インターフェース `AiClient` で扱うモジュール群。`complete`（テキスト生成）・`completeWithImage`（画像+テキスト生成）・`completeWithDocumentStructured`（画像/PDF からの構造化抽出）を共通 API として提供する。
 
 モデル名は `ai/config.ts` の `AI_MODELS` オブジェクトに集約し、`heavy` / `balanced` / `lite` の3ティアで管理する。モデル名を変更するときは `config.ts` だけを編集する。
 
 ## インストール
 
 ```bash
+# テキスト / 画像生成（complete / completeWithImage）
 npm install @google/generative-ai @anthropic-ai/sdk openai
+# 構造化抽出（completeWithDocumentStructured / ai/ocr）
+npm install ai @ai-sdk/google @ai-sdk/anthropic zod pdf-lib
 ```
 
 ## 使い方
@@ -35,6 +38,22 @@ const description = await gemini.completeWithImage(
   'この画像に何が写っていますか？',
   imageBase64,
   'image/jpeg',
+);
+```
+
+### 構造化抽出（OCR）
+
+`completeWithDocumentStructured` は AI SDK の `generateObject` を用い、画像/PDF を Zod スキーマで型付き抽出する。大きい PDF のページ分割・補正・検証をまとめた汎用関数は `ai/ocr` を参照。**GPT は当面未対応**（throw）で、OCR は Gemini / Claude 中心に運用する。
+
+```typescript
+import { z } from 'zod';
+
+const schema = z.object({ invoiceNumber: z.string(), totalAmount: z.number() });
+const data = await gemini.completeWithDocumentStructured(
+  '請求書番号と合計金額を抽出してください',
+  pdfBase64,
+  'application/pdf',
+  schema,
 );
 ```
 
