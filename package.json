@@ -24,7 +24,7 @@
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "@vis.gl/react-google-maps": "^1.8.3",
-    "ai": "^6.0.194",
+    "ai": "^6.0.195",
     "firebase-admin": "^13.8.0",
     "firebase-functions": "^7.2.5",
     "openai": "^6.36.0",
